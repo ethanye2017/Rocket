@@ -1,55 +1,80 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Mini KSP Rocket</title>
+  <title>Mini KSP</title>
   <style>
-    canvas {
+    body {
+      margin: 0;
       background: black;
+      color: lime;
+      font-family: monospace;
+      text-align: center;
+    }
+    canvas {
       display: block;
       margin: auto;
+      background: black;
+    }
+    #thrustBtn {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 120px;
+      height: 120px;
+      border-radius: 60px;
+      background: orange;
+      color: black;
+      font-size: 20px;
+      border: none;
     }
   </style>
 </head>
 <body>
 
 <canvas id="game" width="400" height="600"></canvas>
+<button id="thrustBtn">THRUST</button>
 
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+const btn = document.getElementById("thrustBtn");
 
 let rocket = {
   x: 200,
   y: 500,
-  velocity: 0,
-  mass: 20,
+  v: 0,
   fuel: 100,
-  thrustPower: 0.15,
   thrusting: false
 };
 
 const gravity = 0.05;
+const thrust = 0.15;
 
+// Keyboard
 document.addEventListener("keydown", e => {
   if (e.code === "Space") rocket.thrusting = true;
 });
-
 document.addEventListener("keyup", e => {
   if (e.code === "Space") rocket.thrusting = false;
 });
 
+// Touch button
+btn.addEventListener("touchstart", () => rocket.thrusting = true);
+btn.addEventListener("touchend", () => rocket.thrusting = false);
+btn.addEventListener("mousedown", () => rocket.thrusting = true);
+btn.addEventListener("mouseup", () => rocket.thrusting = false);
+
 function update() {
   if (rocket.thrusting && rocket.fuel > 0) {
-    rocket.velocity -= rocket.thrustPower;
+    rocket.v -= thrust;
     rocket.fuel -= 0.3;
   }
-
-  rocket.velocity += gravity;
-  rocket.y += rocket.velocity;
+  rocket.v += gravity;
+  rocket.y += rocket.v;
 
   if (rocket.y > 500) {
     rocket.y = 500;
-    rocket.velocity = 0;
+    rocket.v = 0;
   }
 }
 
@@ -68,8 +93,8 @@ function draw() {
 
   // HUD
   ctx.fillStyle = "lime";
-  ctx.fillText("Fuel: " + Math.max(0, rocket.fuel.toFixed(1)), 10, 20);
-  ctx.fillText("Velocity: " + rocket.velocity.toFixed(2), 10, 40);
+  ctx.fillText("Fuel: " + rocket.fuel.toFixed(1), 10, 20);
+  ctx.fillText("Velocity: " + rocket.v.toFixed(2), 10, 40);
 }
 
 function loop() {
