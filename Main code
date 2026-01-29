@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Mini KSP Rocket</title>
+  <style>
+    canvas {
+      background: black;
+      display: block;
+      margin: auto;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="game" width="400" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let rocket = {
+  x: 200,
+  y: 500,
+  velocity: 0,
+  mass: 20,
+  fuel: 100,
+  thrustPower: 0.15,
+  thrusting: false
+};
+
+const gravity = 0.05;
+
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") rocket.thrusting = true;
+});
+
+document.addEventListener("keyup", e => {
+  if (e.code === "Space") rocket.thrusting = false;
+});
+
+function update() {
+  if (rocket.thrusting && rocket.fuel > 0) {
+    rocket.velocity -= rocket.thrustPower;
+    rocket.fuel -= 0.3;
+  }
+
+  rocket.velocity += gravity;
+  rocket.y += rocket.velocity;
+
+  if (rocket.y > 500) {
+    rocket.y = 500;
+    rocket.velocity = 0;
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Rocket
+  ctx.fillStyle = "white";
+  ctx.fillRect(rocket.x - 5, rocket.y - 20, 10, 20);
+
+  // Flame
+  if (rocket.thrusting && rocket.fuel > 0) {
+    ctx.fillStyle = "orange";
+    ctx.fillRect(rocket.x - 3, rocket.y, 6, 10);
+  }
+
+  // HUD
+  ctx.fillStyle = "lime";
+  ctx.fillText("Fuel: " + Math.max(0, rocket.fuel.toFixed(1)), 10, 20);
+  ctx.fillText("Velocity: " + rocket.velocity.toFixed(2), 10, 40);
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>
