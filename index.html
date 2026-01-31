@@ -1,166 +1,226 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Mini KSP – Camera Chase</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <style>
-    body {
-      margin: 0;
-      background: black;
-      color: lime;
-      font-family: monospace;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    canvas {
-      background: black;
-      border: 1px solid #222;
-    }
-    button {
-      width: 160px;
-      height: 70px;
-      font-size: 24px;
-      background: orange;
-      border: none;
-      border-radius: 10px;
-      margin: 10px;
-    }
-  </style>
-</head>
-<body>
-
-<canvas id="game" width="400" height="600"></canvas>
-<button id="thrustBtn">🚀 THRUST</button>
-
 <script>
-const canvas = document.getElementById("game");
+/* ================= CANVAS ================= */
+const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const btn = document.getElementById("thrustBtn");
 
-// 🌍 Planet
-const planet = {
-  x: 0,
-  y: 0,
-  radius: 80,
-  mu: 1200
-};
+function resize() {
+  const dpr = devicePixelRatio || 1;
+  canvas.width = innerWidth * dpr;
+  canvas.height = innerHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+addEventListener("resize", resize);
 
-// 🚀 Rocket (world space)
-let rocket = {
-  x: 0,
-  y: -planet.radius - 20,
-  vx: 0,
-  vy: 0,
-  angle: -Math.PI / 2,
-  fuel: 300,
-  thrusting: false
-};
+/* ================= CONSTANTS ================= */
+const G = 6.674e-11;
+const PLANET_MASS = 5.972e24;
+const PLANET_RADIUS = 6_371_000;
 
-// 🎥 Camera (starts at rocket)
-let camera = {
-  x: rocket.x,
-  y: rocket.y
-};
+const SEA_LEVEL_DENSITY = 1.225;
+const SCALE_HEIGHT = 8500;
 
-const thrustPower = 0.05;
-const cameraSmoothness = 0.05; // smaller = smoother
+const THRUST_FORCE = 35;
+const FUEL_BURN = 20;
 
-// Controls
-btn.addEventListener("touchstart", () => rocket.thrusting = true);
-btn.addEventListener("touchend", () => rocket.thrusting = false);
-btn.addEventListener("mousedown", () => rocket.thrusting = true);
-btn.addEventListener("mouseup", () => rocket.thrusting = false);
+/* ================= STATE ================= */
+let thrusting = false;
+let rocket;
 
-document.addEventListener("keydown", e => {
-  if (e.code === "Space") rocket.thrusting = true;
-});
-document.addEventListener("keyup", e => {
-  if (e.code === "Space") rocket.thrusting = false;
-});
+/* ================= RESET ================= */
+function resetRocket() {
+  rocket = {
+    mass: 1200,
+    fuel: 300,
+    area: 1,
+    Cd: 0.5,
 
-// Physics update
-function update() {
-  // Gravity (inverse square)
-  const dx = planet.x - rocket.x;
-  const dy = planet.y - rocket.y;
-  const r = Math.hypot(dx, dy);
+    pos: { x: PLANET_RADIUS + 50_000, y: 0 },
+    vel: { x: 0, y: 7800 },
 
-  const g = planet.mu / (r * r);
-  rocket.vx += (dx / r) * g;
-  rocket.vy += (dy / r) * g;
+    temp: 300,
+    exploded: false
+  };
+}
+resetRocket();
 
-  // Thrust
-  if (rocket.thrusting && rocket.fuel > 0) {
-    rocket.vx += Math.cos(rocket.angle) * thrustPower;
-    rocket.vy += Math.sin(rocket.angle) * thrustPower;
-    rocket.fuel -= 0.3;
-  }
+/* ================= TOUCH ================= */
+const thrustBtn = document.getElementById("parachuteBtn");
+thrustBtn.innerHTML = "🚀 THRUST";
 
-  rocket.x += rocket.vx;
-  rocket.y += rocket.vy;
+thrustBtn.ontouchstart = () => thrusting = true;
+thrustBtn.ontouchend = () => thrusting = false;
+thrustBtn.onmousedown = () => thrusting = true;
+thrustBtn.onmouseup = () => thrusting = false;
 
-  // Crash reset
-  if (r < planet.radius) {
-    rocket.x = 0;
-    rocket.y = -planet.radius - 20;
-    rocket.vx = rocket.vy = 0;
-  }
+document.getElementById("resetBtn").ontouchstart = resetRocket;
 
-  // 🎥 CAMERA CHASE (smooth follow)
-  camera.x += (rocket.x - camera.x) * cameraSmoothness;
-  camera.y += (rocket.y - camera.y) * cameraSmoothness;
+/* ================= PHYSICS ================= */
+function gravity(pos) {
+  const r = Math.hypot(pos.x, pos.y);
+  const g = G * PLANET_MASS / (r * r);
+  return { x: -g * pos.x / r, y: -g * pos.y / r };
 }
 
-// Draw
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+function airDensity(alt) {
+  return alt < 0 ? 0 : SEA_LEVEL_DENSITY * Math.exp(-alt / SCALE_HEIGHT);
+}
 
-  ctx.save();
-  ctx.translate(
-    canvas.width / 2 - camera.x,
-    canvas.height / 2 - camera.y
+function drag(vel, alt) {
+  const d = airDensity(alt);
+  const s = Math.hypot(vel.x, vel.y);
+  if (!d || !s) return { x: 0, y: 0 };
+  const f = 0.5 * d * s * s * rocket.Cd * rocket.area;
+  return { x: -f * vel.x / s, y: -f * vel.y / s };
+}
+
+/* ================= UPDATE ================= */
+function update(dt) {
+  if (rocket.exploded) return;
+
+  const r = Math.hypot(rocket.pos.x, rocket.pos.y);
+  const alt = r - PLANET_RADIUS;
+
+  let acc = gravity(rocket.pos);
+  const d = drag(rocket.vel, alt);
+
+  acc.x += d.x / rocket.mass;
+  acc.y += d.y / rocket.mass;
+
+  // THRUST (FIXED & CORRECT)
+  if (thrusting && rocket.fuel > 0) {
+    const nx = rocket.pos.x / r;
+    const ny = rocket.pos.y / r;
+
+    acc.x += nx * THRUST_FORCE / rocket.mass;
+    acc.y += ny * THRUST_FORCE / rocket.mass;
+
+    rocket.fuel -= FUEL_BURN * dt;
+  }
+
+  rocket.vel.x += acc.x * dt;
+  rocket.vel.y += acc.y * dt;
+
+  rocket.pos.x += rocket.vel.x * dt;
+  rocket.pos.y += rocket.vel.y * dt;
+
+  // Heating
+  const speed = Math.hypot(rocket.vel.x, rocket.vel.y);
+  rocket.temp += airDensity(alt) * speed ** 3 * 1e-6 * dt;
+  rocket.temp -= 5 * dt;
+
+  if (rocket.temp > 2000) rocket.exploded = true;
+}
+
+/* ================= ORBIT PREVIEW ================= */
+function drawOrbitPreview() {
+  let p = { ...rocket.pos };
+  let v = { ...rocket.vel };
+
+  ctx.strokeStyle = "rgba(0,255,255,0.4)";
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+
+  for (let i = 0; i < 500; i++) {
+    const g = gravity(p);
+    v.x += g.x * 2;
+    v.y += g.y * 2;
+    p.x += v.x * 2;
+    p.y += v.y * 2;
+
+    const r = Math.hypot(p.x, p.y);
+    if (r < PLANET_RADIUS) break;
+    ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
+}
+
+/* ================= DRAW ================= */
+function draw() {
+  ctx.setTransform(0.4, 0, 0, 0.4,
+    canvas.width / 2 - rocket.pos.x * 0.4,
+    canvas.height / 2 - rocket.pos.y * 0.4
   );
 
+  ctx.clearRect(-1e7, -1e7, 2e7, 2e7);
+
   // Planet
-  ctx.fillStyle = "blue";
+  ctx.fillStyle = "#0044ff";
   ctx.beginPath();
-  ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
+  ctx.arc(0, 0, PLANET_RADIUS, 0, Math.PI * 2);
   ctx.fill();
+
+  drawOrbitPreview();
+
+  // VECTORS
+  drawVector(rocket.pos, rocket.vel, "cyan", 200);
+  drawVector(rocket.pos, gravity(rocket.pos), "red", 5);
+
+  if (thrusting) {
+    const r = Math.hypot(rocket.pos.x, rocket.pos.y);
+    drawVector(
+      rocket.pos,
+      { x: rocket.pos.x / r, y: rocket.pos.y / r },
+      "lime",
+      300
+    );
+  }
 
   // Rocket
   ctx.save();
-  ctx.translate(rocket.x, rocket.y);
-  ctx.rotate(rocket.angle);
+  ctx.translate(rocket.pos.x, rocket.pos.y);
+  ctx.rotate(Math.atan2(rocket.vel.y, rocket.vel.x));
   ctx.fillStyle = "white";
-  ctx.fillRect(-4, -12, 8, 24);
-
-  if (rocket.thrusting && rocket.fuel > 0) {
-    ctx.fillStyle = "orange";
-    ctx.fillRect(-3, 12, 6, 10);
-  }
+  ctx.fillRect(-15, -5, 30, 10);
   ctx.restore();
 
-  ctx.restore();
-
-  // HUD
-  ctx.fillStyle = "lime";
-  ctx.fillText("Fuel: " + rocket.fuel.toFixed(0), 10, 20);
-  ctx.fillText(
-    "Speed: " + Math.hypot(rocket.vx, rocket.vy).toFixed(2),
-    10,
-    40
-  );
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-function loop() {
-  update();
+/* ================= VECTOR DRAW ================= */
+function drawVector(origin, vec, color, scale) {
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(origin.x, origin.y);
+  ctx.lineTo(
+    origin.x + vec.x * scale,
+    origin.y + vec.y * scale
+  );
+  ctx.stroke();
+}
+
+/* ================= NAVBALL ================= */
+function drawNavball() {
+  const cx = 80, cy = canvas.height - 80;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = "white";
+  ctx.beginPath();
+  ctx.arc(0, 0, 40, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const vAng = Math.atan2(rocket.vel.y, rocket.vel.x);
+  ctx.strokeStyle = "cyan";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(Math.cos(vAng) * 30, Math.sin(vAng) * 30);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+/* ================= LOOP ================= */
+let last = performance.now();
+function loop(t) {
+  const dt = (t - last) / 1000;
+  last = t;
+
+  update(dt);
   draw();
+  drawNavball();
+
   requestAnimationFrame(loop);
 }
-
-loop();
+loop(last);
 </script>
-
-</body>
-</html>
+  
